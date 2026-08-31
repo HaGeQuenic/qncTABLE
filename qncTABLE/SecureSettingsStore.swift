@@ -35,7 +35,7 @@ struct SecureSettingsStore {
 
     // MARK: - Keychain
     private func fetchOrCreateSymmetricKey() throws -> SymmetricKey {
-        if let data = try? readKeyFromKeychain(), let keyData = data {
+        if let keyData = try readKeyFromKeychain() {
             return SymmetricKey(data: keyData)
         }
         let key = SymmetricKey(size: .bits256)

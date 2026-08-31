@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 struct AppSettings: Codable, Equatable {
     var deviceID: String
@@ -31,3 +32,4 @@ final class SettingsViewModel: ObservableObject {
         isSaving = false
     }
 }
+
