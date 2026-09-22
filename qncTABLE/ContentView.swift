@@ -103,7 +103,10 @@ struct ContentView: View {
                         title: entry.name,
                         selectString: entry.selectString,
                         iconName: entry.iconName,
-                        baseTableName: entry.baseTableName
+                        baseTableName: entry.baseTableName,
+                        onLoaded: { loadedAt in
+                            updateCachedLoadedAt(loadedAt, for: entry)
+                        }
                     )
                 } label: {
                     tableRow(entry)
@@ -195,6 +198,20 @@ struct ContentView: View {
             selectString: entry.selectString
         )
         return cachedLoadedDates[key]
+    }
+
+    private func updateCachedLoadedAt(_ loadedAt: Date, for entry: QncTableEntry) {
+        let currentDeviceID = deviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !currentDeviceID.isEmpty else {
+            return
+        }
+
+        let key = QueryResultResponseCache.cacheKey(
+            deviceID: currentDeviceID,
+            title: entry.name,
+            selectString: entry.selectString
+        )
+        cachedLoadedDates[key] = loadedAt
     }
 }
 

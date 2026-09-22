@@ -92,6 +92,7 @@ struct TableDetailView: View {
     let selectString: String
     let iconName: String?
     let baseTableName: String?
+    let onLoaded: (Date) -> Void
     @State private var table: QueryResultTable?
     @State private var filterText = ""
     @State private var appliedFilterText = ""
@@ -116,11 +117,18 @@ struct TableDetailView: View {
     private let responseCache = QueryResultResponseCache()
     private let tablePadding: CGFloat = 16
 
-    init(title: String, selectString: String, iconName: String? = nil, baseTableName: String? = nil) {
+    init(
+        title: String,
+        selectString: String,
+        iconName: String? = nil,
+        baseTableName: String? = nil,
+        onLoaded: @escaping (Date) -> Void = { _ in }
+    ) {
         self.title = title
         self.selectString = selectString
         self.iconName = iconName
         self.baseTableName = baseTableName
+        self.onLoaded = onLoaded
     }
 
     private var activeFilterCount: Int {
@@ -404,6 +412,7 @@ struct TableDetailView: View {
         selectedSummaryAggregation = QuerySummaryAggregation(rawValue: summarySettings.aggregation ?? "") ?? .sum
         self.loadedAt = loadedAt
         loadedCacheKey = cacheKey
+        onLoaded(loadedAt)
     }
 
     @ViewBuilder
