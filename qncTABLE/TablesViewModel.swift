@@ -63,7 +63,9 @@ final class TablesViewModel: ObservableObject {
     }
 
     private func loadEntries(deviceID: String, forceRefresh: Bool) async throws -> LoadedTableOverview {
-        if !forceRefresh, let cachedEntries = entriesCache.cachedEntries(for: deviceID) {
+        if !forceRefresh,
+           let cachedEntries = entriesCache.cachedEntries(for: deviceID),
+           cachedEntries.entries.allSatisfy({ $0.baseTableName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }) {
             return LoadedTableOverview(entries: cachedEntries.entries, loadedAt: cachedEntries.loadedAt)
         }
 

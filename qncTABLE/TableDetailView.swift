@@ -1,10 +1,97 @@
 import SwiftUI
 import Foundation
+import QuickLook
+#if os(macOS)
+import AppKit
+#endif
+
+#if os(macOS)
+private struct QueryPreferredPresentationSizing: PresentationSizing {
+    let size: CGSize
+
+    func proposedSize(
+        for root: PresentationSizingRoot,
+        context: PresentationSizingContext
+    ) -> ProposedViewSize {
+        ProposedViewSize(size)
+    }
+}
+#endif
+
+private extension View {
+    @ViewBuilder
+    func queryCustomMenuStyle() -> some View {
+#if os(macOS)
+        menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func queryResizableSheet(
+        minWidth: CGFloat,
+        idealWidth: CGFloat,
+        maxWidth: CGFloat,
+        minHeight: CGFloat,
+        idealHeight: CGFloat,
+        maxHeight: CGFloat
+    ) -> some View {
+#if os(macOS)
+        presentationSizing(
+            QueryPreferredPresentationSizing(
+                size: CGSize(width: idealWidth, height: idealHeight)
+            )
+        )
+            .frame(
+                minWidth: minWidth,
+                idealWidth: idealWidth,
+                maxWidth: maxWidth,
+                minHeight: minHeight,
+                idealHeight: idealHeight,
+                maxHeight: maxHeight
+            )
+            .windowResizeBehavior(.enabled)
+#else
+        self
+#endif
+    }
+
+    @ViewBuilder
+    func queryInlineNavigationTitle() -> some View {
+#if os(macOS)
+        self
+#else
+        navigationBarTitleDisplayMode(.inline)
+#endif
+    }
+
+    @ViewBuilder
+    func queryPlainTextInput() -> some View {
+#if os(macOS)
+        self
+#else
+        textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+#endif
+    }
+
+    @ViewBuilder
+    func queryDecimalInput() -> some View {
+#if os(macOS)
+        self
+#else
+        keyboardType(.decimalPad)
+#endif
+    }
+}
 
 struct TableDetailView: View {
     let title: String
     let selectString: String
     let iconName: String?
+    let baseTableName: String?
     @State private var table: QueryResultTable?
     @State private var filterText = ""
     @State private var appliedFilterText = ""
@@ -29,10 +116,11 @@ struct TableDetailView: View {
     private let responseCache = QueryResultResponseCache()
     private let tablePadding: CGFloat = 16
 
-    init(title: String, selectString: String, iconName: String? = nil) {
+    init(title: String, selectString: String, iconName: String? = nil, baseTableName: String? = nil) {
         self.title = title
         self.selectString = selectString
         self.iconName = iconName
+        self.baseTableName = baseTableName
     }
 
     private var activeFilterCount: Int {
@@ -63,7 +151,9 @@ struct TableDetailView: View {
 
     var body: some View {
         Group {
-            if isLoading {
+            if let table, !table.isEmpty {
+                resultView(table)
+            } else if isLoading {
                 VStack(spacing: 12) {
                     ProgressView()
                     Text(loadingMessage)
@@ -78,8 +168,6 @@ struct TableDetailView: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let table, !table.isEmpty {
-                resultView(table)
             } else {
                 Text("Keine Daten")
                     .foregroundStyle(.secondary)
@@ -87,7 +175,7 @@ struct TableDetailView: View {
             }
         }
         .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
+        .queryInlineNavigationTitle()
         .overlay {
             if isPreparingSummary {
                 QueryResultLoadingOverlay(message: "Bereite Summe vor…")
@@ -226,7 +314,9 @@ struct TableDetailView: View {
         isLoading = true
         loadingMessage = loadingMessage(forceRefresh: forceRefresh, cacheKey: cacheKey)
         errorMessage = nil
-        clearLoadedState()
+        if loadedCacheKey != cacheKey {
+            clearLoadedState()
+        }
         defer { isLoading = false }
         await Task.yield()
 
@@ -329,6 +419,7 @@ struct TableDetailView: View {
                 QueryResultRecordSheet(
                     title: displayText(for: displayValue(for: selectedRecord.row, columns: displayColumns)),
                     row: selectedRecord.row,
+                    baseTableName: baseTableName,
                     columns: displayColumns,
                     columnKinds: columnKindsByName(),
                     positionText: "\(selectedRecord.index + 1) von \(selectedRecord.total)",
@@ -348,6 +439,7 @@ struct TableDetailView: View {
                 QueryResultRecordSheet(
                     title: displayText(for: displayValue(for: selectedRecord.row, columns: displayColumns)),
                     row: selectedRecord.row,
+                    baseTableName: baseTableName,
                     columns: displayColumns,
                     columnKinds: columnKindsByName(),
                     positionText: "1 von 1",
@@ -377,6 +469,7 @@ struct TableDetailView: View {
             if let summaryContext {
                 QueryResultSummaryView(
                     title: title,
+                    baseTableName: baseTableName,
                     rows: summaryContext.rows,
                     columns: summaryContext.columns,
                     headlineColumn: summaryContext.headlineColumn,
@@ -1437,6 +1530,7 @@ private struct QueryColumnSelectionControl: View {
                         .stroke(Color.secondary.opacity(0.22), lineWidth: 0.5)
                 }
             }
+            .queryCustomMenuStyle()
             .disabled(columns.isEmpty)
         }
         .accessibilityElement(children: .combine)
@@ -1522,8 +1616,7 @@ private struct QueryResultTextFilterBar: View {
                     .foregroundStyle(.secondary)
 
                 TextField("Filter", text: $text)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .queryPlainTextInput()
 
                 if !text.isEmpty {
                     Button {
@@ -1647,8 +1740,7 @@ private struct QueryResultFilterSheet: View {
         switch filter.wrappedValue.kind {
         case .text:
             TextField("Enthält", text: filter.text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
+                .queryPlainTextInput()
         case .number:
             Picker("Vergleich", selection: filter.numberOperator) {
                 ForEach(QueryNumberFilterOperator.allCases) { comparison in
@@ -1658,7 +1750,7 @@ private struct QueryResultFilterSheet: View {
             .pickerStyle(.segmented)
 
             TextField("Wert", text: filter.numberText)
-                .keyboardType(.decimalPad)
+                .queryDecimalInput()
         case .boolean:
             Toggle("Aktiv", isOn: filter.isEnabled)
 
@@ -1803,6 +1895,7 @@ private struct QueryResultSummaryView: View {
     @State private var expandedSummaryIDs = Set<String>()
 
     let title: String
+    let baseTableName: String?
     let rows: [QueryResultRow]
     let columns: [String]
     let headlineColumn: String?
@@ -1920,7 +2013,7 @@ private struct QueryResultSummaryView: View {
                         .lineLimit(1)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         activeSheet = .filters
                     } label: {
@@ -1938,6 +2031,14 @@ private struct QueryResultSummaryView: View {
                 }
             }
         }
+        .queryResizableSheet(
+            minWidth: 720,
+            idealWidth: 1_000,
+            maxWidth: 2_400,
+            minHeight: 520,
+            idealHeight: 760,
+            maxHeight: 1_800
+        )
         .onAppear {
             ensureSelectedColumns()
             rebuildSummaryEntries()
@@ -1970,6 +2071,36 @@ private struct QueryResultSummaryView: View {
 
     private var summaryControls: some View {
         VStack(alignment: .leading, spacing: 12) {
+#if os(macOS)
+            HStack(alignment: .bottom, spacing: 12) {
+                if !columns.isEmpty {
+                    QueryColumnSelectionControl(
+                        title: "Gruppierung",
+                        placeholder: "Gruppierung wählen",
+                        systemImage: "rectangle.3.group",
+                        columns: columns,
+                        selection: groupColumnBinding
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+
+                HStack(alignment: .bottom, spacing: 10) {
+                    if !valueColumns.isEmpty {
+                        QueryColumnSelectionControl(
+                            title: selectedAggregation.title,
+                            placeholder: "Summenspalte wählen",
+                            systemImage: selectedAggregation.systemImage,
+                            columns: valueColumns,
+                            selection: valueColumnBinding
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+
+                    summaryAggregationButton
+                }
+                .frame(maxWidth: .infinity)
+            }
+#else
             if !columns.isEmpty {
                 QueryColumnSelectionControl(
                     title: "Gruppierung",
@@ -1993,6 +2124,7 @@ private struct QueryResultSummaryView: View {
 
                 summaryAggregationButton
             }
+#endif
 
             QueryResultTextFilterBar(
                 initialText: filterText,
@@ -2037,6 +2169,7 @@ private struct QueryResultSummaryView: View {
                         .stroke(Color.secondary.opacity(0.22), lineWidth: 0.5)
                 }
         }
+        .queryCustomMenuStyle()
         .buttonStyle(.plain)
         .accessibilityLabel("Berechnung: \(selectedAggregation.title)")
     }
@@ -2418,6 +2551,7 @@ private struct QueryResultSummaryView: View {
             QueryResultRecordSheet(
                 title: rowLabel(for: selectedRecord.row, headlineColumn: headlineColumn, columns: columns, index: selectedRecord.index),
                 row: selectedRecord.row,
+                baseTableName: baseTableName,
                 columns: columns,
                 columnKinds: columnKinds,
                 positionText: "\(selectedRecord.index + 1) von \(selectedRecord.total)",
@@ -2647,7 +2781,7 @@ private struct QueryResultChartView: View {
                         .lineLimit(1)
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         activeSheet = .filters
                     } label: {
@@ -2754,6 +2888,7 @@ private struct QueryResultChartView: View {
             QueryResultRecordSheet(
                 title: rowLabel(for: selectedRecord.row, index: selectedRecord.index),
                 row: selectedRecord.row,
+                baseTableName: nil,
                 columns: columns,
                 columnKinds: columnKinds,
                 positionText: "\(selectedRecord.index + 1) von \(selectedRecord.total)",
@@ -3263,17 +3398,43 @@ private nonisolated func formattedIntegerNumber(_ value: Int) -> String {
     return formatter.string(from: NSNumber(value: value)) ?? String(value)
 }
 
+private struct QueryResultPresentationEditModeModifier: ViewModifier {
+    @Binding var isEditing: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+#if os(macOS)
+        content
+#else
+        content.environment(
+            \.editMode,
+            Binding<EditMode>(
+                get: { isEditing ? .active : .inactive },
+                set: { isEditing = $0.isEditing }
+            )
+        )
+#endif
+    }
+}
+
 private struct QueryResultRecordSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var editMode: EditMode = .inactive
+    @State private var isEditingPresentation = false
     @State private var draftVisibleColumns = Set<String>()
+    @State private var draftColumns: [String] = []
     @State private var dragOffset: CGFloat = 0
     @State private var transitionOffset: CGFloat = 0
     @State private var transitionOpacity = 1.0
     @State private var pendingNavigationDirection: RecordNavigationDirection?
+    @State private var documents: [TableImageDocument] = []
+    @State private var documentErrorMessage: String?
+    @State private var isLoadingDocuments = false
+    @State private var loadedDocumentLookupKey: String?
+    @State private var isShowingDocuments = false
 
     let title: String
     let row: QueryResultRow
+    let baseTableName: String?
     let columns: [String]
     let columnKinds: [String: QueryColumnFilterKind]
     let positionText: String
@@ -3284,12 +3445,18 @@ private struct QueryResultRecordSheet: View {
     let onPrevious: () -> Void
     let onNext: () -> Void
 
+    private let store = SecureSettingsStore()
+
+    private var presentedColumns: [String] {
+        isEditingPresentation ? draftColumns : columns
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                ForEach(columns, id: \.self) { column in
+                ForEach(presentedColumns, id: \.self) { column in
                     HStack(alignment: .top, spacing: 12) {
-                        if editMode.isEditing {
+                        if isEditingPresentation {
                             Button {
                                 toggleVisibleColumn(column)
                             } label: {
@@ -3320,9 +3487,9 @@ private struct QueryResultRecordSheet: View {
                         }
                     }
                 }
-                .onMove(perform: onMoveColumns)
+                .onMove(perform: moveDraftColumns)
             }
-            .environment(\.editMode, $editMode)
+            .modifier(QueryResultPresentationEditModeModifier(isEditing: $isEditingPresentation))
             .offset(x: dragOffset + transitionOffset)
             .opacity(transitionOpacity)
             .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.86), value: dragOffset)
@@ -3330,6 +3497,18 @@ private struct QueryResultRecordSheet: View {
                 animateRecordEntry()
             }
             .simultaneousGesture(recordNavigationGesture)
+            .sheet(isPresented: $isShowingDocuments) {
+                QueryResultDocumentsSheet(
+                    documents: documents,
+                    isLoading: isLoadingDocuments,
+                    errorMessage: documentErrorMessage
+                ) {
+                    await loadDocuments(forceRefresh: true)
+                }
+            }
+            .task(id: documentLookupKey) {
+                await loadDocuments()
+            }
             .navigationTitle(title.isEmpty ? "Datensatz" : title)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -3338,33 +3517,158 @@ private struct QueryResultRecordSheet: View {
                         .foregroundStyle(.secondary)
                 }
 
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(editMode.isEditing ? "Abbrechen" : "Darstellung") {
-                        if editMode.isEditing {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(isEditingPresentation ? "Abbrechen" : "Darstellung") {
+                        if isEditingPresentation {
                             cancelPresentationEditing()
                         } else {
                             startPresentationEditing()
                         }
                     }
-                    .foregroundStyle(editMode.isEditing ? Color.accentColor : Color.primary)
+                    .foregroundStyle(isEditingPresentation ? Color.accentColor : Color.primary)
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") {
-                        if editMode.isEditing {
-                            applyPresentationEditing()
-                        } else {
-                            dismiss()
+                    HStack(spacing: 12) {
+                        if shouldShowDocumentsButton {
+                            recordDocumentsButton
+                        }
+
+                        Button("Fertig") {
+                            if isEditingPresentation {
+                                applyPresentationEditing()
+                            } else {
+                                dismiss()
+                            }
                         }
                     }
                 }
             }
         }
+        .queryResizableSheet(
+            minWidth: 640,
+            idealWidth: 780,
+            maxWidth: 2_000,
+            minHeight: 480,
+            idealHeight: 680,
+            maxHeight: 1_600
+        )
+    }
+
+    private var shouldShowDocumentsButton: Bool {
+        documentLookupKey != nil
+    }
+
+    private var documentLookupKey: String? {
+        guard let baseTableName = trimmedBaseTableName,
+              let tableID = recordTableID else {
+            return nil
+        }
+
+        return "\(baseTableName)\n\(tableID)"
+    }
+
+    private var trimmedBaseTableName: String? {
+        let trimmedValue = baseTableName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedValue.isEmpty ? nil : trimmedValue
+    }
+
+    private var recordTableID: String? {
+        let trimmedValue = row.value(forColumnName: "ID")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmedValue.isEmpty ? nil : trimmedValue
+    }
+
+    private var documentButtonCountText: String {
+        if isLoadingDocuments && documents.isEmpty {
+            return "…"
+        }
+
+        return formattedIntegerNumber(documents.count)
+    }
+
+    private var documentButtonAccessibilityLabel: String {
+        if isLoadingDocuments {
+            return "Dokumente werden geladen"
+        }
+
+        if documentErrorMessage != nil {
+            return "Dokumente konnten nicht geladen werden"
+        }
+
+        return "\(documents.count) Dokumente"
+    }
+
+    private var recordDocumentsButton: some View {
+        Button {
+            isShowingDocuments = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.text")
+                    .symbolRenderingMode(.hierarchical)
+
+                Text(documentButtonCountText)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .foregroundStyle(documentErrorMessage == nil ? Color.primary : Color.orange)
+        }
+        .disabled(isLoadingDocuments || (documents.isEmpty && documentErrorMessage == nil))
+        .accessibilityLabel(documentButtonAccessibilityLabel)
+    }
+
+    @MainActor
+    private func loadDocuments(forceRefresh: Bool = false) async {
+        guard let baseTableName = trimmedBaseTableName,
+              let tableID = recordTableID,
+              let lookupKey = documentLookupKey else {
+            clearDocumentState()
+            return
+        }
+
+        guard forceRefresh || loadedDocumentLookupKey != lookupKey else {
+            return
+        }
+
+        let settings = (try? store.load()) ?? .default
+        let deviceID = settings.deviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !deviceID.isEmpty else {
+            documents = []
+            documentErrorMessage = "DeviceID fehlt. Bitte in den Einstellungen vergeben."
+            loadedDocumentLookupKey = lookupKey
+            return
+        }
+
+        isLoadingDocuments = true
+        documentErrorMessage = nil
+        documents = []
+        defer { isLoadingDocuments = false }
+
+        do {
+            documents = try await APIService.shared.fetchTableImageDocuments(
+                baseTableName: baseTableName,
+                tableID: tableID,
+                deviceID: deviceID
+            )
+            loadedDocumentLookupKey = lookupKey
+        } catch {
+            documents = []
+            documentErrorMessage = localizedErrorMessage(error)
+            loadedDocumentLookupKey = lookupKey
+        }
+    }
+
+    private func clearDocumentState() {
+        documents = []
+        documentErrorMessage = nil
+        isLoadingDocuments = false
+        loadedDocumentLookupKey = nil
+        isShowingDocuments = false
     }
 
     private func toggleVisibleColumn(_ column: String) {
         if draftVisibleColumns.contains(column) {
-            let activeVisibleColumns = columns.filter { draftVisibleColumns.contains($0) }
+            let activeVisibleColumns = draftColumns.filter { draftVisibleColumns.contains($0) }
             guard activeVisibleColumns.count > 1 else {
                 return
             }
@@ -3375,36 +3679,60 @@ private struct QueryResultRecordSheet: View {
         }
     }
 
+    private func moveDraftColumns(fromOffsets source: IndexSet, toOffset destination: Int) {
+        draftColumns.move(fromOffsets: source, toOffset: destination)
+    }
+
     private func startPresentationEditing() {
         draftVisibleColumns = visibleColumns
+        draftColumns = columns
         withAnimation {
-            editMode = .active
+            isEditingPresentation = true
         }
     }
 
     private func cancelPresentationEditing() {
         draftVisibleColumns = visibleColumns
+        draftColumns = columns
         withAnimation {
-            editMode = .inactive
+            isEditingPresentation = false
         }
     }
 
     private func applyPresentationEditing() {
-        let selectedColumns = columns.filter { draftVisibleColumns.contains($0) }
+        let selectedColumns = draftColumns.filter { draftVisibleColumns.contains($0) }
         guard !selectedColumns.isEmpty else {
             return
         }
 
+        applyDraftColumnOrder()
         visibleColumns = Set(selectedColumns)
         withAnimation {
-            editMode = .inactive
+            isEditingPresentation = false
+        }
+    }
+
+    private func applyDraftColumnOrder() {
+        var currentColumns = columns
+
+        for targetIndex in draftColumns.indices {
+            let column = draftColumns[targetIndex]
+            guard let currentIndex = currentColumns.firstIndex(of: column),
+                  currentIndex != targetIndex else {
+                continue
+            }
+
+            let destination = currentIndex < targetIndex ? targetIndex + 1 : targetIndex
+            let source = IndexSet(integer: currentIndex)
+            onMoveColumns(source, destination)
+            currentColumns.move(fromOffsets: source, toOffset: destination)
         }
     }
 
     private var recordNavigationGesture: some Gesture {
         DragGesture(minimumDistance: 40)
             .onChanged { value in
-                guard !editMode.isEditing else {
+                guard !isEditingPresentation else {
                     dragOffset = 0
                     return
                 }
@@ -3425,7 +3753,7 @@ private struct QueryResultRecordSheet: View {
                 dragOffset = horizontalDistance * (canNavigate ? 0.35 : 0.12)
             }
             .onEnded { value in
-                guard !editMode.isEditing else {
+                guard !isEditingPresentation else {
                     resetDragOffset()
                     return
                 }
@@ -3523,6 +3851,263 @@ private struct QueryResultRecordSheet: View {
     }
 }
 
+private enum QueryDocumentOpenError: LocalizedError {
+    case noApplication
+
+    var errorDescription: String? {
+        "Für dieses Dokument ist keine Anwendung zum Öffnen verfügbar."
+    }
+}
+
+@MainActor
+final class TableImageDocumentSessionCache {
+    static let shared = TableImageDocumentSessionCache()
+
+    private var fileURLs: [String: URL] = [:]
+
+    private init() {}
+
+    func fileURL(for document: TableImageDocument, deviceID: String) async throws -> URL {
+        let key = "\(deviceID)\n\(document.oid)"
+        if let cachedURL = fileURLs[key], FileManager.default.fileExists(atPath: cachedURL.path) {
+            return cachedURL
+        }
+
+        let data = try await APIService.shared.fetchFile(oid: document.oid, deviceID: deviceID)
+        let fileURL = try await Task.detached(priority: .userInitiated) {
+            try saveTableImageDocumentFile(data: data, document: document)
+        }.value
+        fileURLs[key] = fileURL
+        return fileURL
+    }
+
+    nonisolated static func clearDiskCacheAtLaunch() {
+        guard let directoryURL = try? tableImageDocumentCacheDirectoryURL(),
+              FileManager.default.fileExists(atPath: directoryURL.path) else {
+            return
+        }
+
+        try? FileManager.default.removeItem(at: directoryURL)
+    }
+}
+
+private struct QueryResultDocumentRow: View {
+    let name: String
+    let descriptionText: String?
+    let isLoading: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "doc.text")
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                if let descriptionText {
+                    Text(descriptionText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 8)
+
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+}
+
+private struct QueryResultDocumentsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var previewURL: URL?
+    @State private var loadingDocumentID: UUID?
+    @State private var downloadErrorMessage: String?
+    @State private var isRefreshing = false
+
+    let documents: [TableImageDocument]
+    let isLoading: Bool
+    let errorMessage: String?
+    let onRefresh: () async -> Void
+
+    private let store = SecureSettingsStore()
+
+    var body: some View {
+        NavigationStack {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .navigationTitle("Dokumente")
+                .queryInlineNavigationTitle()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Fertig") {
+                            dismiss()
+                        }
+                    }
+
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            Task { await refreshDocuments() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .accessibilityLabel("Dokumente neu laden")
+                        .disabled(isLoading || isRefreshing)
+                    }
+                }
+                .quickLookPreview($previewURL)
+                .alert("Dokument konnte nicht geöffnet werden", isPresented: downloadErrorBinding) {
+                    Button("OK", role: .cancel) {
+                        downloadErrorMessage = nil
+                    }
+                } message: {
+                    Text(downloadErrorMessage ?? "")
+                }
+        }
+        .queryResizableSheet(
+            minWidth: 640,
+            idealWidth: 800,
+            maxWidth: 1_800,
+            minHeight: 480,
+            idealHeight: 650,
+            maxHeight: 1_400
+        )
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isLoading || isRefreshing {
+            QueryResultInlineLoadingView(message: "Lade Dokumente…")
+        } else if let errorMessage {
+            documentsErrorView(errorMessage)
+        } else if documents.isEmpty {
+            documentsEmptyView
+        } else {
+            documentsList
+        }
+    }
+
+    private var documentsList: some View {
+        List {
+            ForEach(documents) { document in
+                Button {
+                    Task { await openDocument(document) }
+                } label: {
+                    QueryResultDocumentRow(
+                        name: document.name.isEmpty ? "Dokument" : displayText(for: document.name),
+                        descriptionText: document.beschreibung.isEmpty ? nil : displayText(for: document.beschreibung),
+                        isLoading: loadingDocumentID == document.id
+                    )
+                }
+                .buttonStyle(.plain)
+                .disabled(loadingDocumentID != nil)
+            }
+        }
+    }
+
+    private func documentsErrorView(_ errorMessage: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle")
+                .imageScale(.large)
+                .foregroundStyle(.orange)
+
+            Text(errorMessage)
+                .multilineTextAlignment(.center)
+
+            Button("Erneut laden") {
+                Task { await refreshDocuments() }
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var documentsEmptyView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "doc.text")
+                .imageScale(.large)
+                .foregroundStyle(.secondary)
+
+            Text("Keine Dokumente")
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var downloadErrorBinding: Binding<Bool> {
+        Binding {
+            downloadErrorMessage != nil
+        } set: { isPresented in
+            if !isPresented {
+                downloadErrorMessage = nil
+            }
+        }
+    }
+
+    @MainActor
+    private func refreshDocuments() async {
+        guard !isRefreshing else {
+            return
+        }
+
+        isRefreshing = true
+        defer { isRefreshing = false }
+        await onRefresh()
+    }
+
+    @MainActor
+    private func openDocument(_ document: TableImageDocument) async {
+        guard loadingDocumentID == nil else {
+            return
+        }
+
+        let settings = (try? store.load()) ?? .default
+        let deviceID = settings.deviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !deviceID.isEmpty else {
+            downloadErrorMessage = "DeviceID fehlt. Bitte in den Einstellungen vergeben."
+            return
+        }
+
+        loadingDocumentID = document.id
+        downloadErrorMessage = nil
+        defer { loadingDocumentID = nil }
+
+        do {
+            let fileURL = try await TableImageDocumentSessionCache.shared.fileURL(
+                for: document,
+                deviceID: deviceID
+            )
+#if os(macOS)
+            guard NSWorkspace.shared.open(fileURL) else {
+                throw QueryDocumentOpenError.noApplication
+            }
+#else
+            previewURL = fileURL
+#endif
+        } catch {
+            downloadErrorMessage = localizedErrorMessage(error)
+        }
+    }
+}
+
 private enum RecordNavigationDirection {
     case previous
     case next
@@ -3552,6 +4137,122 @@ private struct ContactLink {
     let color: Color
     let url: URL
     let accessibilityLabel: String
+}
+
+private nonisolated func saveTableImageDocumentFile(data: Data, document: TableImageDocument) throws -> URL {
+    do {
+        let directoryURL = try tableImageDocumentCacheDirectoryURL()
+            .appendingPathComponent(sanitizedFileName(document.oid), isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        let fileURL = directoryURL.appendingPathComponent(tableImageDocumentFileName(for: document), isDirectory: false)
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
+    } catch let error as APIError {
+        throw error
+    } catch {
+        throw APIError.fileWrite(error)
+    }
+}
+
+private nonisolated func tableImageDocumentCacheDirectoryURL() throws -> URL {
+    guard let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+        throw APIError.invalidURL
+    }
+
+    return cachesURL
+        .appendingPathComponent("qncTABLE", isDirectory: true)
+        .appendingPathComponent("table-image-files", isDirectory: true)
+}
+
+private nonisolated func tableImageDocumentFileName(for document: TableImageDocument) -> String {
+    let baseName = sanitizedFileName(document.name.isEmpty ? "Dokument" : document.name)
+    let fileExtension = normalizedFileExtension(from: document.fileType)
+    guard !fileExtension.isEmpty else {
+        return baseName
+    }
+
+    let existingExtension = (baseName as NSString).pathExtension.lowercased()
+    guard existingExtension != fileExtension else {
+        return baseName
+    }
+
+    return "\(baseName).\(fileExtension)"
+}
+
+private nonisolated func sanitizedFileName(_ value: String) -> String {
+    let forbiddenCharacters = CharacterSet(charactersIn: "/\\:?%*|\"<>")
+        .union(.newlines)
+    let sanitizedValue = value
+        .components(separatedBy: forbiddenCharacters)
+        .joined(separator: "-")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard !sanitizedValue.isEmpty, sanitizedValue != ".", sanitizedValue != ".." else {
+        return "Dokument"
+    }
+
+    return sanitizedValue
+}
+
+private nonisolated func normalizedFileExtension(from fileType: String) -> String {
+    var trimmedValue = fileType
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+    let lowercasedValue = trimmedValue.lowercased()
+
+    if let mappedExtension = commonFileExtension(for: lowercasedValue) {
+        return mappedExtension
+    }
+
+    if let slashIndex = trimmedValue.firstIndex(of: "/") {
+        trimmedValue = String(trimmedValue[trimmedValue.index(after: slashIndex)...])
+    }
+
+    if let plusIndex = trimmedValue.firstIndex(of: "+") {
+        trimmedValue = String(trimmedValue[..<plusIndex])
+    }
+
+    let allowedCharacters = CharacterSet.alphanumerics
+    return trimmedValue.unicodeScalars
+        .filter { allowedCharacters.contains($0) }
+        .map(String.init)
+        .joined()
+        .lowercased()
+}
+
+private nonisolated func commonFileExtension(for fileType: String) -> String? {
+    switch fileType {
+    case "application/pdf":
+        return "pdf"
+    case "image/jpeg":
+        return "jpg"
+    case "image/png":
+        return "png"
+    case "image/gif":
+        return "gif"
+    case "text/plain":
+        return "txt"
+    case "text/csv":
+        return "csv"
+    case "application/zip":
+        return "zip"
+    case "application/msword":
+        return "doc"
+    case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        return "docx"
+    case "application/vnd.ms-excel":
+        return "xls"
+    case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        return "xlsx"
+    default:
+        return nil
+    }
+}
+
+private nonisolated func localizedErrorMessage(_ error: Error) -> String {
+    let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    return message.isEmpty ? "Unbekannter Fehler." : message
 }
 
 private struct NumericColumnProfile: Sendable {

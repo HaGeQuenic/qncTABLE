@@ -44,7 +44,7 @@ struct ContentView: View {
             }
             .navigationTitle("qncTABLE")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         Task { await reloadTableOverview(forceRefresh: true) }
                     } label: {
@@ -58,7 +58,7 @@ struct ContentView: View {
                     .accessibilityLabel("Neu laden")
                     .disabled(tablesVM.isLoading)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
                         showingSettings = true
                     } label: {
@@ -99,7 +99,12 @@ struct ContentView: View {
         List {
             ForEach(tablesVM.entries) { entry in
                 NavigationLink {
-                    TableDetailView(title: entry.name, selectString: entry.selectString, iconName: entry.iconName)
+                    TableDetailView(
+                        title: entry.name,
+                        selectString: entry.selectString,
+                        iconName: entry.iconName,
+                        baseTableName: entry.baseTableName
+                    )
                 } label: {
                     tableRow(entry)
                 }

@@ -15,12 +15,14 @@ enum APIError: Error, LocalizedError {
     case invalidURL
     case badStatus(Int)
     case decoding(Error)
+    case fileWrite(Error)
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Ungültige URL"
         case .badStatus(let code): return "Serverfehler (Status: \(code))"
         case .decoding(let err): return "Daten konnten nicht gelesen werden: \(err.localizedDescription)"
+        case .fileWrite(let err): return "Datei konnte nicht gespeichert werden: \(err.localizedDescription)"
         }
     }
 }
@@ -78,6 +80,29 @@ final class APIService {
         let text = try await fetchRows(selectString: selectString, deviceID: deviceID)
         return try QueryResultTableParser().parse(responseText: text)
     }
+
+    func fetchTableImageDocuments(baseTableName: String, tableID: String, deviceID: String) async throws -> [TableImageDocument] {
+        let select = "select * from [S_TableImages] where TableName = \(qncSQLStringLiteral(baseTableName)) and TableID = \(qncSQLStringLiteral(tableID))"
+        let table = try await fetchResultTable(selectString: select, deviceID: deviceID)
+        return table.rows.compactMap(TableImageDocument.init(row:))
+    }
+
+    func fetchFile(oid: String, deviceID: String) async throws -> Data {
+        var comps = URLComponents(string: "https://api.quenic.com/qncAPIGetFile")
+        comps?.queryItems = [
+            URLQueryItem(name: "oID", value: oid),
+            URLQueryItem(name: "deviceID", value: deviceID)
+        ]
+        guard let url = comps?.url else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw APIError.badStatus(http.statusCode)
+        }
+        return data
+    }
 }
 
 struct QueryResultTable: Equatable, Sendable {
@@ -92,6 +117,44 @@ struct QueryResultTable: Equatable, Sendable {
 struct QueryResultRow: Identifiable, Equatable, Sendable {
     let id = UUID()
     let values: [String: String]
+
+    func value(forColumnName columnName: String) -> String? {
+        if let value = values[columnName] {
+            return value
+        }
+
+        return values.first { element in
+            element.key.compare(columnName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+        }?.value
+    }
+}
+
+struct TableImageDocument: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let oid: String
+    let name: String
+    let beschreibung: String
+    let fileType: String
+
+    init?(row: QueryResultRow) {
+        let oid = row.value(forColumnName: "OID")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !oid.isEmpty else {
+            return nil
+        }
+
+        self.oid = oid
+        self.name = row.value(forColumnName: "Name")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.beschreibung = row.value(forColumnName: "Beschreibung")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.fileType = row.value(forColumnName: "FileType")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+}
+
+private func qncSQLStringLiteral(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "''"))'"
 }
 
 final class QueryResultTableParser: NSObject, XMLParserDelegate, @unchecked Sendable {
@@ -377,11 +440,13 @@ struct QncTableEntry: Identifiable, Hashable, Codable, Sendable {
     let name: String
     let selectString: String
     let iconName: String?
+    let baseTableName: String?
 
     enum CodingKeys: String, CodingKey {
         case name
         case selectString
         case iconName
+        case baseTableName
     }
 }
 
@@ -470,6 +535,7 @@ final class QncTablesXMLParser: NSObject, XMLParserDelegate {
     private var currentName: String = ""
     private var currentSelect: String = ""
     private var currentIcon: String = ""
+    private var currentBaseTableName: String = ""
     private var accumulating: String = ""
 
     func parse(dataXML: String) -> [QncTableEntry] {
@@ -494,6 +560,7 @@ final class QncTablesXMLParser: NSObject, XMLParserDelegate {
             currentName = ""
             currentSelect = ""
             currentIcon = ""
+            currentBaseTableName = ""
         }
     }
 
@@ -507,8 +574,14 @@ final class QncTablesXMLParser: NSObject, XMLParserDelegate {
         case "Name": currentName = value
         case "SelectString": currentSelect = value
         case "IconName": currentIcon = value
+        case "BaseTable", "BaseTableName": currentBaseTableName = value
         case "T_QNCTABLES":
-            let entry = QncTableEntry(name: currentName, selectString: currentSelect, iconName: currentIcon.isEmpty ? nil : currentIcon)
+            let entry = QncTableEntry(
+                name: currentName,
+                selectString: currentSelect,
+                iconName: currentIcon.isEmpty ? nil : currentIcon,
+                baseTableName: currentBaseTableName.isEmpty ? nil : currentBaseTableName
+            )
             entries.append(entry)
         default: break
         }
